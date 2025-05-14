@@ -60,7 +60,7 @@ fn create_hist(
         let seq_len = seq.len();
         sequences
             .entry(seq_len)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(entry);
         counts[seq_len] += 1;
     });
@@ -146,7 +146,7 @@ fn fill_packing_strategy(
         let mut _input_ids: Sequence = Vec::new();
         let mut _positions_ids: Sequence = Vec::new();
         for seq_len in assignment {
-            if let Some((input_ids_vec, positions_ids_vec)) = ifile_handles.get_mut(&seq_len) {
+            if let Some((input_ids_vec, positions_ids_vec)) = ifile_handles.get_mut(seq_len) {
                 _input_ids.extend(
                     input_ids_vec
                         .pop()
@@ -174,8 +174,8 @@ fn fill_packing_strategy(
     }
     // Here handle the conversion to the desired format
     // for now is only composer format, which is a vec
-    let list_input_ids: Vec<Sequence> = input_ids.iter().map(|(_, v)| v.clone()).collect();
-    let _list_positions_ids: Vec<Sequence> = positions_ids.iter().map(|(_, v)| v.clone()).collect();
+    let list_input_ids: Vec<Sequence> = input_ids.values().cloned().collect();
+    let _list_positions_ids: Vec<Sequence> = positions_ids.values().cloned().collect();
     let mut result = HashMap::new();
     result.insert("tokens".to_string(), list_input_ids);
     ReturnFormat::Composer(result)
