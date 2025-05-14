@@ -140,11 +140,30 @@ fn create_packing_strategy(
     assignments
 }
 
+fn create_position_ids(input_ids: &Vec<Sequence>) -> Vec<Sequence> {
+    // Create position ids based on the input_ids
+    let positions_ids = input_ids
+        .iter()
+        .map(|seq| {
+            let pos = seq
+                .iter()
+                .enumerate()
+                .map(|(i, _)| i as u32)
+                .collect::<Sequence>();
+            pos
+        })
+        .collect::<Vec<Sequence>>();
+    positions_ids
+}
+// Note that nemo has a different implementation, their answer_start_idx refers to the
+// start of the answer, while here, we use the idx that's before the answer, usually something like
+// the assistant message
 fn create_loss_mask(
-    input_ids: &Sequence,
+    input_ids: Sequence,
     answer_loss_only: bool,
     answer_start_id: Option<u32>,
     answer_end_id: Option<u32>,
+    pad_id: Option<u32>,
 ) -> Sequence {
     // If answer_loss_only is false, return a mask of ones
     if !answer_loss_only {
@@ -158,11 +177,19 @@ fn create_loss_mask(
     // logic here is the default is 0, when the answer starts, the flag is 1, until the answer ends
     let mut is_answer = false;
     for i in 0..input_ids.len() {
+        if let Some(pad_id) = pad_id {
+            if input_ids[i] == pad_id {
+                loss_mask[i] = 0;
+                continue;
+            }
+        } // The next few checks would not be possible if pad_id is set
         if input_ids[i] == answer_start_id {
             is_answer = true;
         } else if input_ids[i] == answer_end_id {
             is_answer = false;
         }
+        // regardless the answer. if the input is pad_id, set it to 0
+        
         loss_mask[i] = if is_answer { 1 } else { 0 };
     }
     loss_mask
@@ -192,20 +219,9 @@ fn populate_ifile_handles(
             // shuffle the input_ids
             input_ids.shuffle(&mut rng);
 
-            let positions_ids = input_ids
-                .iter()
-                .map(|seq| {
-                    let mut pos = vec![0u32; seq.len()];
-                    // Non idiomatic way kept for reference
-                    // for i in 0..seq.len() {
-                    //     pos[i] = seq[i];
-                    // }
-                    pos[..seq.len()].copy_from_slice(&seq[..]);
-                    pos
-                })
-                .collect::<Vec<Sequence>>();
+            let position_ids = create_position_ids(&input_ids);
 
-            ifile_handles.insert(seq_len, (input_ids, positions_ids));
+            ifile_handles.insert(seq_len, (input_ids, position_ids));
         }
     }
 }
@@ -216,6 +232,7 @@ fn nemo_packing_strategy(
     answer_start_id: Option<u32>,
     answer_end_id: Option<u32>,
     answer_loss_only: bool,
+    pad_id: Option<u32>,
 ) -> ReturnFormat {
     // Similar to fill_packing_strategy but for Nemo format
     // This is a placeholder for the actual implementation
@@ -233,16 +250,16 @@ fn nemo_packing_strategy(
             let mut _seq_start_id: Sequence = vec![0];
             for seq_len in assignment {
                 if let Some((input_ids_vec, positions_ids_vec)) = ifile_handles.get_mut(seq_len) {
-                    _input_ids.extend(
-                        input_ids_vec
-                            .pop()
-                            .expect("Expected input_ids to be available"),
-                    );
+                    let _input_vec: Sequence = input_ids_vec
+                        .pop()
+                        .expect("Expected input_ids to be available");
+                    _input_ids.extend(_input_vec.clone());
                     let loss_mask = create_loss_mask(
-                        &_input_ids,
+                        _input_vec,
                         answer_loss_only,
                         answer_start_id,
                         answer_end_id,
+                        pad_id,
                     );
                     _loss_mask.extend(loss_mask);
                     _ = positions_ids_vec // positions_ids are not used in Nemo, but still need to be popped
@@ -312,9 +329,10 @@ fn composer_packing_strategy(
     // Here handle the conversion to the desired format
     // for now is only composer format, which is a vec
     let list_input_ids: Vec<Sequence> = input_ids.values().cloned().collect();
-    let _list_positions_ids: Vec<Sequence> = positions_ids.values().cloned().collect();
+    let list_positions_ids: Vec<Sequence> = positions_ids.values().cloned().collect();
     let mut result = HashMap::new();
     result.insert("tokens".to_string(), list_input_ids);
+    result.insert("positions_ids".to_string(), list_positions_ids);
     ReturnFormat::Composer(result)
 }
 fn fill_packing_strategy(
@@ -331,7 +349,7 @@ fn fill_packing_strategy(
     // Create the packing strategy
     match return_format {
         ReturnFormat::Nemo(_) => {
-            nemo_packing_strategy(&mut ifile_handles, assignments, None, None, false)
+            nemo_packing_strategy(&mut ifile_handles, assignments, None, None, false, pad_id)
         }
         ReturnFormat::Composer(_) => {
             composer_packing_strategy(&mut ifile_handles, assignments, pack_size, pad_id)
@@ -344,4 +362,33 @@ fn fill_packing_strategy(
 fn binpack_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(fast_pack, m)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_position_ids() {
+        let input_ids = vec![vec![1, 2, 3], vec![4, 5, 6, 7]];
+        let position_ids = create_position_ids(&input_ids);
+        assert_eq!(position_ids[0], vec![0, 1, 2]);
+        assert_eq!(position_ids[1], vec![0, 1, 2, 3]);
+    }
+    #[test]
+    fn test_loss_mask() {
+        let input_ids = vec![2, 105, 2364, 107, 3689, 563, 506, 5279, 529, 7001, 236881, 106, 107, 105, 4368, 107, 818, 5279, 529, 7001, 563, 9079, 236761, 106, 107, 105, 2364, 107, 3689, 563, 506, 5279, 529, 9405, 236881, 106, 107, 105, 4368, 107, 818, 5279, 529, 9405, 563, 15687, 236761, 106, 107];
+        let answer_start_id = Some(4368);
+        let answer_end_id = Some(106);
+        let pad_id = None;
+        // One way to think of loss mask is like setting -100 for labels
+        // that are not in the answer
+        let loss_mask = create_loss_mask(input_ids, true, answer_start_id, answer_end_id, pad_id);
+        assert_eq!(loss_mask, vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0]);
+        let pad_id = Some(5279);
+        // Inject a pad id to test
+        let input_ids = vec![2, 105, 2364, 107, 3689, 563, 506, 5279, 529, 7001, 236881, 106, 107, 105, 4368, 107, 818, 5279, 529, 7001, 563, 9079, 236761, 106, 107, 105, 2364, 107, 3689, 563, 506, 5279, 529, 9405, 236881, 106, 107, 105, 4368, 107, 818, 5279, 529, 9405, 563, 0, 236761, 106, 107];
+        let loss_mask = create_loss_mask(input_ids, true, answer_start_id, answer_end_id, pad_id);
+        assert_eq!(loss_mask, vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0]);
+    }
 }
