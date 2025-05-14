@@ -13,12 +13,24 @@ impl PackingAlgo {
             PackingAlgo::FirstFitDecreasing => first_fit_decreasing(seqlens, pack_size),
         }
     }
-    pub fn from_str(s: &str) -> Option<PackingAlgo> {
+    // pub fn from_str(s: &str) -> Option<PackingAlgo> {
+    //     match s {
+    //         "first_fit" => Some(PackingAlgo::FirstFit),
+    //         "first_fit_shuffle" => Some(PackingAlgo::FirstFitShuffle),
+    //         "first_fit_decreasing" => Some(PackingAlgo::FirstFitDecreasing),
+    //         _ => None,
+    //     }
+    // }
+}
+impl std::str::FromStr for PackingAlgo {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "first_fit" => Some(PackingAlgo::FirstFit),
-            "first_fit_shuffle" => Some(PackingAlgo::FirstFitShuffle),
-            "first_fit_decreasing" => Some(PackingAlgo::FirstFitDecreasing),
-            _ => None,
+            "first_fit" => Ok(PackingAlgo::FirstFit),
+            "first_fit_shuffle" => Ok(PackingAlgo::FirstFitShuffle),
+            "first_fit_decreasing" => Ok(PackingAlgo::FirstFitDecreasing),
+            _ => Err("Invalid packing algorithm"),
         }
     }
 }

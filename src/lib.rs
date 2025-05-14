@@ -8,6 +8,7 @@ pub mod packing;
 enum ReturnFormat {
     Composer(HashMap<String, Vec<Vec<u32>>>),
 }
+#[allow(dead_code)]
 enum InputFormat {
     DictOfList(HashMap<String, Vec<Sequence>>),
     ListOfDicts(Vec<HashMap<String, Sequence>>),
@@ -15,6 +16,7 @@ enum InputFormat {
 // Sequence usually refers to things like input_ids, position_ids, etc.
 
 type Sequence = Vec<u32>;
+type Histogram = HashMap<usize, Vec<HashMap<String, Sequence>>>;
 
 /// Formats the sum of two numbers as string.
 #[pyfunction]
@@ -25,8 +27,15 @@ fn fast_pack(
     pad_id: Option<u32>,
 ) -> PyResult<ReturnFormat> {
     let (sequences, seq_lens) = create_hist(examples.clone(), target_pack_size);
-    let packing_algorithm =
-        packing::PackingAlgo::from_str(&packing_algorithm).expect("Invalid packing algorithm");
+    let packing_algorithm = match packing_algorithm
+        .parse::<packing::PackingAlgo>() {
+        Ok(packing_algorithm) => packing_algorithm,
+        Err(_) => {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "Invalid packing algorithm. Use 'first_fit', 'first_fit_shuffle', or 'first_fit_decreasing'.",
+            ))
+        }
+    };
     let assignments = create_packing_strategy(seq_lens, target_pack_size, packing_algorithm);
     let result = fill_packing_strategy(assignments, sequences, target_pack_size, pad_id);
     Ok(result)
@@ -35,7 +44,7 @@ fn fast_pack(
 fn create_hist(
     dataset: HashMap<String, Vec<Sequence>>,
     truncate_seq_len: usize,
-) -> (HashMap<usize, Vec<HashMap<String, Sequence>>>, Vec<usize>) {
+) -> (Histogram, Vec<usize>) {
     let mut sequences: HashMap<usize, Vec<HashMap<String, Sequence>>> = HashMap::new();
     let mut counts = vec![0u32; truncate_seq_len + 1];
     let mut seq_lens: Vec<usize> = Vec::new();
@@ -58,10 +67,7 @@ fn create_hist(
             .get("input_ids")
             .expect("Expected key 'input_ids' in the dataset entry");
         let seq_len = seq.len();
-        sequences
-            .entry(seq_len)
-            .or_default()
-            .push(entry);
+        sequences.entry(seq_len).or_default().push(entry);
         counts[seq_len] += 1;
     });
 
@@ -128,9 +134,11 @@ fn fill_packing_strategy(
                 .iter()
                 .map(|seq| {
                     let mut pos = vec![0u32; seq.len()];
-                    for i in 0..seq.len() {
-                        pos[i] = seq[i];
-                    }
+                    // Non idiomatic way kept for reference
+                    // for i in 0..seq.len() {
+                    //     pos[i] = seq[i];
+                    // }
+                    pos[..seq.len()].copy_from_slice(&seq[..]);
                     pos
                 })
                 .collect::<Vec<Sequence>>();
