@@ -150,6 +150,7 @@ fn create_packing_strategy(
 
     assignments
 }
+
 /// A Python module implemented in Rust.
 #[pymodule]
 fn binpack_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
