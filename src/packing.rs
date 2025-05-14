@@ -18,7 +18,7 @@ impl std::str::FromStr for PackingAlgo {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
+        match s.to_lowercase().as_str() {
             "first_fit" => Ok(PackingAlgo::FirstFit),
             "first_fit_shuffle" => Ok(PackingAlgo::FirstFitShuffle),
             "first_fit_decreasing" => Ok(PackingAlgo::FirstFitDecreasing),

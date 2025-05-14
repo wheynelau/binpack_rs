@@ -15,7 +15,7 @@ impl std::str::FromStr for ReturnFormat {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
+        match s.to_lowercase().as_str() {
             "nemo" => Ok(ReturnFormat::Nemo(HashMap::new())),
             "composer" => Ok(ReturnFormat::Composer(HashMap::new())),
             _ => Err("Invalid return format"),
@@ -167,7 +167,9 @@ fn create_loss_mask(
 ) -> Sequence {
     // If answer_loss_only is false, return a mask of ones
     if !answer_loss_only {
-        return vec![1; input_ids.len()];
+        let mut loss_mask = vec![1; input_ids.len()];
+        loss_mask[0] = 0; // The first token is always 0
+        return loss_mask;
     }
     // Otherwise, create a mask based on the answer_start_id and answer_end_id
     let mut loss_mask: Sequence = vec![0; input_ids.len()];
@@ -377,6 +379,10 @@ mod tests {
     }
     #[test]
     fn test_loss_mask() {
+        // No answer
+        let input_ids = vec![1,2,3,4,5];
+        let loss_mask = create_loss_mask(input_ids, false, None, None, None);
+        assert_eq!(loss_mask, vec![0, 1, 1, 1, 1]);
         let input_ids = vec![2, 105, 2364, 107, 3689, 563, 506, 5279, 529, 7001, 236881, 106, 107, 105, 4368, 107, 818, 5279, 529, 7001, 563, 9079, 236761, 106, 107, 105, 2364, 107, 3689, 563, 506, 5279, 529, 9405, 236881, 106, 107, 105, 4368, 107, 818, 5279, 529, 9405, 563, 15687, 236761, 106, 107];
         let answer_start_id = Some(4368);
         let answer_end_id = Some(106);
