@@ -67,6 +67,10 @@ fn create_hist(
             .get("input_ids")
             .expect("Expected key 'input_ids' in the dataset entry");
         let seq_len = seq.len();
+        // Should we check if the inputs were truncated?
+        if seq_len > truncate_seq_len {
+            panic!("Sequence length exceeds the maximum allowed length.");
+        }
         sequences.entry(seq_len).or_default().push(entry);
         counts[seq_len] += 1;
     });
