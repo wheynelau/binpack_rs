@@ -1,5 +1,6 @@
 use super::composer::composer_packing_strategy;
 use super::nemo::nemo_packing_strategy;
+use super::iterator::iterator_packing_strategy;
 use crate::NemoOptions;
 use crate::{Histogram, IFileHandles, ReturnFormat, Sequence};
 use rand::prelude::*;
@@ -72,6 +73,9 @@ pub fn fill_packing_strategy(
         }
         ReturnFormat::Composer(_) => {
             composer_packing_strategy(&mut ifile_handles, assignments, pack_size, pad_id)
+        }
+        ReturnFormat::Iterator(_) => {
+            iterator_packing_strategy(&mut ifile_handles, assignments, pack_size, pad_id)
         }
     }
 }

@@ -8,13 +8,15 @@ use common::{Histogram, IFileHandles, Sequence};
 
 use strategy::common::fill_packing_strategy;
 use strategy::nemo::NemoOptions;
+use strategy::iterator::PyReturnIter;
 
-#[derive(IntoPyObject, IntoPyObjectRef)]
+#[derive(IntoPyObject)]
 pub enum ReturnFormat {
     Composer(HashMap<String, Vec<Vec<u32>>>),
     // Nemo has the same format, but the keys are different
     // Different entries
     Nemo(HashMap<String, Vec<Vec<u32>>>),
+    Iterator(PyReturnIter),
 }
 
 impl std::str::FromStr for ReturnFormat {
@@ -24,6 +26,9 @@ impl std::str::FromStr for ReturnFormat {
         match s.to_lowercase().as_str() {
             "nemo" => Ok(ReturnFormat::Nemo(HashMap::new())),
             "composer" => Ok(ReturnFormat::Composer(HashMap::new())),
+            "iterator" => Ok(ReturnFormat::Iterator(PyReturnIter {
+                iter: Vec::new().into_iter(),
+            })),
             _ => Err("Invalid return format"),
         }
     }
@@ -80,6 +85,21 @@ fn fast_pack(
                 target_pack_size,
                 pad_id,
                 ReturnFormat::Nemo(HashMap::new()),
+                Some(options),
+            )
+        }
+        "iterator" => {
+            // Extract Nemo-specific kwargs from kwargs dict
+            let options = NemoOptions::builder().from_py_dict(kwargs)?.build()?;
+
+            fill_packing_strategy(
+                assignments,
+                sequences,
+                target_pack_size,
+                pad_id,
+                ReturnFormat::Iterator(PyReturnIter {
+                    iter: Vec::new().into_iter(),
+                }),
                 Some(options),
             )
         }
