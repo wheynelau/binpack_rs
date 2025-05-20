@@ -7,8 +7,8 @@ pub mod strategy;
 use common::{Histogram, IFileHandles, Sequence};
 
 use strategy::common::fill_packing_strategy;
-use strategy::nemo::NemoOptions;
 use strategy::iterator::PyReturnIter;
+use strategy::nemo::NemoOptions;
 
 #[derive(IntoPyObject)]
 pub enum ReturnFormat {

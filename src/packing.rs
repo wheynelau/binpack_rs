@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use rand::prelude::*;
 pub enum PackingAlgo {
     FirstFit,
@@ -29,19 +31,50 @@ impl std::str::FromStr for PackingAlgo {
 
 fn first_fit(seqlens: Vec<usize>, pack_size: usize) -> Vec<Vec<usize>> {
     let mut res: Vec<Vec<usize>> = Vec::new(); // Holds the packed bins
-    let mut sum_of_bin: Vec<usize> = Vec::new(); // Holds the sum of each bin
-    'outer: for s in seqlens {
-        for i in 0..res.len() {
-            if sum_of_bin[i] + s <= pack_size {
-                res[i].push(s);
-                sum_of_bin[i] += s;
-                continue 'outer;
+                                               // Map from remaining capacity to bin indices (ordered)
+    let mut capacity_map: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+
+    for s in seqlens {
+        // Find a bin with sufficient capacity
+        let mut bin_found = false;
+        let mut bin_to_update = None;
+
+        // Find all bins with at least s remaining capacity
+        for (&capacity, indices) in capacity_map.range_mut(s..) {
+            if !indices.is_empty() {
+                // Take the first bin index (maintains first-fit order)
+                let bin_idx = indices[0];
+                bin_to_update = Some((bin_idx, capacity));
+                bin_found = true;
+                break;
             }
         }
-        // If no bin fits, create a new one
-        res.push(vec![s]);
-        sum_of_bin.push(s);
+
+        if bin_found {
+            let (bin_idx, old_capacity) = bin_to_update.unwrap();
+
+            // Remove bin from its current capacity entry
+            let indices = capacity_map.get_mut(&old_capacity).unwrap();
+            indices.remove(0);
+            if indices.is_empty() {
+                capacity_map.remove(&old_capacity);
+            }
+
+            // Add item to bin
+            res[bin_idx].push(s);
+
+            // Update bin's capacity in the map
+            let new_capacity = old_capacity - s;
+            capacity_map.entry(new_capacity).or_default().push(bin_idx);
+        } else {
+            // Create a new bin
+            let new_bin_idx = res.len();
+            res.push(vec![s]);
+            let remaining = pack_size - s;
+            capacity_map.entry(remaining).or_default().push(new_bin_idx);
+        }
     }
+
     res
 }
 

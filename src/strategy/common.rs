@@ -1,6 +1,6 @@
 use super::composer::composer_packing_strategy;
-use super::nemo::nemo_packing_strategy;
 use super::iterator::iterator_packing_strategy;
+use super::nemo::nemo_packing_strategy;
 use crate::NemoOptions;
 use crate::{Histogram, IFileHandles, ReturnFormat, Sequence};
 use rand::prelude::*;

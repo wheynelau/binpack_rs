@@ -1,12 +1,11 @@
+use crate::{IFileHandles, ReturnFormat, Sequence};
 use pyo3::prelude::*;
 use std::collections::{BTreeMap, HashMap};
-use crate::{IFileHandles, ReturnFormat, Sequence};
 
 #[pyclass]
 pub struct PyReturnIter {
-     pub iter: std::vec::IntoIter<HashMap<String, Sequence>>,
+    pub iter: std::vec::IntoIter<HashMap<String, Sequence>>,
 }
-
 
 #[pymethods]
 impl PyReturnIter {
