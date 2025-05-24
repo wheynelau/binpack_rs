@@ -2,7 +2,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-use crate::{IFileHandles, ReturnFormat, Sequence};
+use crate::{IFileHandles, LossMask, NemoFormat, ReturnFormat, Sequence};
 use std::collections::HashMap;
 
 pub struct NemoOptions {
@@ -101,35 +101,39 @@ fn create_loss_mask(
     answer_start_id: Option<u32>,
     answer_end_id: Option<u32>,
     pad_id: Option<u32>,
-) -> Sequence {
+) -> LossMask {
     // If answer_loss_only is false, return a mask of ones
     if !answer_loss_only {
-        let mut loss_mask = vec![1; input_ids.len()];
-        loss_mask[0] = 0; // The first token is always 0
+        let mut loss_mask = vec![true; input_ids.len()];
+        loss_mask[0] = false; // The first token is always 0
+                              // replace pad_id with 0
+        if let Some(pad_id) = pad_id {
+            for i in 0..input_ids.len() {
+                if input_ids[i] == pad_id {
+                    loss_mask[i] = false;
+                }
+            }
+        }
         return loss_mask;
     }
     // Otherwise, create a mask based on the answer_start_id and answer_end_id
-    let mut loss_mask: Sequence = vec![0; input_ids.len()];
+    let mut loss_mask: LossMask = vec![false; input_ids.len()];
     // unwrap idx here
     let answer_start_id = answer_start_id.expect("answer_start_id is None");
     let answer_end_id = answer_end_id.expect("answer_end_id is None");
     // logic here is the default is 0, when the answer starts, the flag is 1, until the answer ends
-    let mut is_answer = false;
     for i in 0..input_ids.len() {
         if let Some(pad_id) = pad_id {
             if input_ids[i] == pad_id {
-                loss_mask[i] = 0;
+                loss_mask[i] = false;
                 continue;
             }
         } // The next few checks would not be possible if pad_id is set
         if input_ids[i] == answer_start_id {
-            is_answer = true;
+            loss_mask[i] = true;
         } else if input_ids[i] == answer_end_id {
-            is_answer = false;
+            loss_mask[i] = false;
         }
-        // regardless the answer. if the input is pad_id, set it to 0
-
-        loss_mask[i] = if is_answer { 1 } else { 0 };
     }
     loss_mask
 }
@@ -152,7 +156,7 @@ pub(super) fn nemo_packing_strategy(
         .for_each(|(oindex, assignment)| {
             let mut _input_ids: Sequence = Vec::new();
             // Loss mask only needs 0,1 but for easier conversion, use u32
-            let mut _loss_mask: Sequence = Vec::new();
+            let mut _loss_mask: LossMask = Vec::new();
             let mut _seq_start_id: Sequence = vec![0];
             for seq_len in assignment {
                 if let Some((input_ids_vec, positions_ids_vec)) = ifile_handles.get_mut(seq_len) {
@@ -170,7 +174,8 @@ pub(super) fn nemo_packing_strategy(
                     _loss_mask.extend(loss_mask);
                     _ = positions_ids_vec // positions_ids are not used in Nemo, but still need to be popped
                         .pop()
-                        .expect("Expected positions_ids to be available")
+                        .expect("Expected positions_ids to be available");
+                    _seq_start_id.push(_input_ids.len() as u32);
                 }
             } // Loop handling assignment ends here
             input_ids.insert(oindex, _input_ids);
@@ -183,12 +188,18 @@ pub(super) fn nemo_packing_strategy(
         }); // for each ends here
             // for the return format
     let list_input_ids: Vec<Sequence> = input_ids.values().cloned().collect();
-    let list_position_ids: Vec<Sequence> = loss_mask.values().cloned().collect();
+    let list_position_ids: Vec<LossMask> = loss_mask.values().cloned().collect();
     let list_seq_start_id: Vec<Sequence> = seq_start_id.values().cloned().collect();
-    let mut result = HashMap::new();
-    result.insert("input_ids".to_string(), list_input_ids);
-    result.insert("loss_mask".to_string(), list_position_ids);
-    result.insert("seq_start_id".to_string(), list_seq_start_id);
+    let mut result: HashMap<String, NemoFormat> = HashMap::new();
+    result.insert("input_ids".to_string(), NemoFormat::Tokens(list_input_ids));
+    result.insert(
+        "loss_mask".to_string(),
+        NemoFormat::LossMask(list_position_ids),
+    );
+    result.insert(
+        "seq_start_id".to_string(),
+        NemoFormat::Tokens(list_seq_start_id),
+    );
 
     ReturnFormat::Nemo(result)
 }
@@ -201,7 +212,7 @@ mod tests {
         // No answer
         let input_ids = vec![1, 2, 3, 4, 5];
         let loss_mask = create_loss_mask(input_ids, false, None, None, None);
-        assert_eq!(loss_mask, vec![0, 1, 1, 1, 1]);
+        assert_eq!(loss_mask, vec![false, true, true, true, true]);
         let input_ids = vec![
             2, 105, 2364, 107, 3689, 563, 506, 5279, 529, 7001, 236881, 106, 107, 105, 4368, 107,
             818, 5279, 529, 7001, 563, 9079, 236761, 106, 107, 105, 2364, 107, 3689, 563, 506,
@@ -217,8 +228,10 @@ mod tests {
         assert_eq!(
             loss_mask,
             vec![
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0
+                false, false, false, false, false, false, false, false, false, false, false, false,
+                false, false, true, true, true, true, true, true, true, true, true, false, false,
+                false, false, false, false, false, false, false, false, false, false, false, false,
+                false, true, true, true, true, true, true, true, true, true, false, false
             ]
         );
         let pad_id = Some(5279);
@@ -226,15 +239,17 @@ mod tests {
         let input_ids = vec![
             2, 105, 2364, 107, 3689, 563, 506, 5279, 529, 7001, 236881, 106, 107, 105, 4368, 107,
             818, 5279, 529, 7001, 563, 9079, 236761, 106, 107, 105, 2364, 107, 3689, 563, 506,
-            5279, 529, 9405, 236881, 106, 107, 105, 4368, 107, 818, 5279, 529, 9405, 563, 0,
+            5279, 529, 9405, 236881, 106, 107, 105, 4368, 107, 818, 5279, 529, 9405, 563, 15687,
             236761, 106, 107,
         ];
         let loss_mask = create_loss_mask(input_ids, true, answer_start_id, answer_end_id, pad_id);
         assert_eq!(
             loss_mask,
             vec![
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0
+                false, false, false, false, false, false, false, false, false, false, false, false,
+                false, false, true, true, true, false, true, true, true, true, true, false, false,
+                false, false, false, false, false, false, false, false, false, false, false, false,
+                false, true, true, true, false, true, true, true, true, true, false, false
             ]
         );
     }

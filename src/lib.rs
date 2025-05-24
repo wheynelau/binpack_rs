@@ -4,7 +4,7 @@ use std::collections::HashMap;
 pub mod common;
 pub mod packing;
 pub mod strategy;
-use common::{Histogram, IFileHandles, Sequence};
+use common::{Histogram, IFileHandles, LossMask, Sequence};
 
 use strategy::common::fill_packing_strategy;
 use strategy::iterator::PyReturnIter;
@@ -12,11 +12,17 @@ use strategy::nemo::NemoOptions;
 
 #[derive(IntoPyObject)]
 pub enum ReturnFormat {
-    Composer(HashMap<String, Vec<Vec<u32>>>),
+    Composer(HashMap<String, Vec<Sequence>>),
     // Nemo has the same format, but the keys are different
     // Different entries
-    Nemo(HashMap<String, Vec<Vec<u32>>>),
+    Nemo(HashMap<String, NemoFormat>),
     Iterator(PyReturnIter),
+}
+
+#[derive(IntoPyObject)]
+pub enum NemoFormat {
+    LossMask(Vec<LossMask>),
+    Tokens(Vec<Sequence>),
 }
 
 impl std::str::FromStr for ReturnFormat {
@@ -33,25 +39,25 @@ impl std::str::FromStr for ReturnFormat {
         }
     }
 }
-
+// TODO: Consider using the seq_lens from datasets
 #[allow(dead_code)]
+#[derive(FromPyObject)]
 enum InputFormat {
-    DictOfList(HashMap<String, Vec<Sequence>>),
-    ListOfDicts(Vec<HashMap<String, Sequence>>),
+    InputIds(Vec<Sequence>),
+    SeqLen(Sequence),
 }
-
 /// Formats the sum of two numbers as string.
 #[pyfunction]
 #[pyo3(signature = (examples, target_pack_size, packing_algorithm, return_format, pad_id, **kwargs))]
 fn fast_pack(
-    examples: HashMap<String, Vec<Sequence>>,
+    examples: HashMap<String, InputFormat>,
     target_pack_size: usize,
     packing_algorithm: String,
     return_format: String,
     pad_id: Option<u32>,
     kwargs: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<ReturnFormat> {
-    let (sequences, seq_lens) = create_hist(examples.clone(), target_pack_size);
+    let (sequences, seq_lens) = create_hist(&examples, target_pack_size);
     let packing_algorithm = match packing_algorithm
         .parse::<packing::PackingAlgo>() {
         Ok(packing_algorithm) => packing_algorithm,
@@ -110,7 +116,7 @@ fn fast_pack(
 }
 
 fn create_hist(
-    dataset: HashMap<String, Vec<Sequence>>,
+    dataset: &HashMap<String, InputFormat>,
     truncate_seq_len: usize,
 ) -> (Histogram, Vec<usize>) {
     let mut sequences: HashMap<usize, Vec<HashMap<String, Sequence>>> = HashMap::new();
@@ -119,13 +125,17 @@ fn create_hist(
 
     // format the input data into a list of dicts
     let dataset = dataset
-        .into_iter()
-        .flat_map(|(key, value)| {
-            value.into_iter().map(move |v| {
-                let mut entry = HashMap::new();
-                entry.insert(key.clone(), v);
-                entry
-            })
+        .iter()
+        .flat_map(|(key, value)| match value {
+            InputFormat::InputIds(vec_seq) => vec_seq
+                .iter()
+                .map(move |v| {
+                    let mut entry = HashMap::new();
+                    entry.insert(key.clone(), v.clone());
+                    entry
+                })
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
         })
         .collect::<Vec<_>>();
 
@@ -163,7 +173,7 @@ fn create_packing_strategy(
     let all_seq_lens: Vec<usize> = histogram
         .iter()
         .enumerate()
-        .flat_map(|(i, &count)| std::iter::repeat(i).take(count))
+        .flat_map(|(i, &count)| std::iter::repeat_n(i, count))
         .collect();
 
     let assignments: Vec<Vec<usize>> = packing_algorithm.pack(all_seq_lens, pack_size);
